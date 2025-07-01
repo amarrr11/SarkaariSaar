@@ -11,12 +11,6 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 # Loaders
 from langchain_community.document_loaders import UnstructuredURLLoader
 try:
-    from langchain_community.document_loaders import WrightHTMLLoader
-    HAS_WRIGHT = True
-except ImportError:
-    HAS_WRIGHT = False
-
-try:
     from langchain_community.document_loaders import PlaywrightURLLoader
     HAS_PLAYWRIGHT = True
 except ImportError:
@@ -31,7 +25,6 @@ except ImportError:
 load_dotenv()
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
 
-# ------------------- Load URL Content -------------------
 def load_urls(url_list):
     print("LOADING URLS:", url_list)
     docs = []
@@ -48,13 +41,23 @@ def load_urls(url_list):
                     f.write(res.content)
                 loader = PyPDFLoader(pdf_path)
                 pdf_docs = loader.load()
-                docs.extend(pdf_docs)
-                print(f"✅ Loaded PDF content: {url}")
+                
+                # Combine all PDF pages into single document
+                if pdf_docs:
+                    combined_content = "\n\n".join([doc.page_content for doc in pdf_docs])
+                    combined_doc = Document(
+                        page_content=combined_content,
+                        metadata={"source": url, "type": "pdf", "pages": len(pdf_docs)}
+                    )
+                    docs.append(combined_doc)
+                    print(f"✅ Loaded PDF with {len(pdf_docs)} pages: {url}")
+                
                 os.remove(pdf_path)
                 continue
             except Exception as pe:
                 print(f"❌ Failed to load PDF: {pe}")
 
+        # Try UnstructuredURLLoader first
         try:
             print(f"🔄 Trying UnstructuredURLLoader for: {url}")
             loader = UnstructuredURLLoader(urls=[url])
@@ -62,30 +65,26 @@ def load_urls(url_list):
             if url_docs and len(url_docs) > 0 and url_docs[0].page_content.strip():
                 docs.extend(url_docs)
                 print(f"✅ Loaded with UnstructuredURLLoader: {url}")
-                print(f"Content preview: {url_docs[0].page_content[:300]}...")
                 continue
             else:
                 raise Exception("Empty content from UnstructuredURLLoader")
         except Exception as e:
             print(f"❌ UnstructuredURLLoader failed for {url}: {e}")
 
+        # Try PlaywrightURLLoader second
         if HAS_PLAYWRIGHT:
-            print(f"⚠️ Skipping PlaywrightURLLoader (unsupported on some Windows systems): {url}")
-
-        if HAS_WRIGHT:
             try:
-                print(f"🔄 Trying WrightHTMLLoader for: {url}")
-                loader = WrightHTMLLoader(urls=[url])
+                print(f"🔄 Trying PlaywrightURLLoader for: {url}")
+                loader = PlaywrightURLLoader(urls=[url])
                 url_docs = loader.load()
                 if url_docs and len(url_docs) > 0 and url_docs[0].page_content.strip():
                     docs.extend(url_docs)
-                    print(f"✅ Loaded with WrightHTMLLoader: {url}")
-                    print(f"Content preview: {url_docs[0].page_content[:300]}...")
+                    print(f"✅ Loaded with PlaywrightURLLoader: {url}")
                     continue
                 else:
-                    print(f"❌ Empty content from WrightHTMLLoader")
-            except Exception as we:
-                print(f"❌ WrightHTMLLoader error for {url}: {we}")
+                    raise Exception("Empty content from PlaywrightURLLoader")
+            except Exception as pe:
+                print(f"❌ PlaywrightURLLoader failed for {url}: {pe}")
 
         # Fallback using requests + BeautifulSoup
         try:
@@ -97,7 +96,6 @@ def load_urls(url_list):
             if content:
                 docs.append(Document(page_content=content, metadata={"source": url}))
                 print(f"✅ Loaded with BeautifulSoup fallback: {url}")
-                print(f"Content preview: {content[:300]}...")
             else:
                 print("❌ BeautifulSoup content is empty")
         except Exception as be:
@@ -106,7 +104,6 @@ def load_urls(url_list):
     print(f"📊 Total documents loaded: {len(docs)}")
     return docs
 
-# ------------------- Process & Embed -------------------
 def process_docs(docs):
     if not docs:
         raise ValueError("No documents loaded. Please check URLs.")
@@ -124,12 +121,10 @@ def process_docs(docs):
         pickle.dump(vectorstore, f)
     return vectorstore
 
-# ------------------- Load FAISS DB from Pickle -------------------
 def load_faiss_store():
     with open("faiss_store.pkl", "rb") as f:
         return pickle.load(f)
 
-# ------------------- Summarize Using Perplexity API -------------------
 def summarize_scheme(text):
     prompt = f"""
 You are an expert in understanding government schemes. Summarize the following into:
@@ -164,7 +159,6 @@ Text:
         print("❌ Perplexity API error (summary):", e)
         return f"⚠️ Failed to fetch summary from Perplexity: {e}"
 
-# ------------------- Q&A Using Perplexity -------------------
 def ask_question(question, context_chunks):
     context = "\n\n".join([doc.page_content for doc in context_chunks])
     prompt = f"""
