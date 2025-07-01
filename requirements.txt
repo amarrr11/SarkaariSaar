@@ -1,9 +1,19 @@
+# Core libraries
 streamlit
+python-dotenv
+requests
+beautifulsoup4
+
+# LangChain core
 langchain
 langchain-community
-sentence-transformers
+langchain-core
+
+# FAISS for vector DB
 faiss-cpu
-requests
-python-dotenv
-beautifulsoup4
-openai
+
+# HuggingFace embeddings
+sentence-transformers
+
+# Unstructured for URL loading
+unstructured
